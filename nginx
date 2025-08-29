@@ -1,35 +1,64 @@
-# /etc/nginx/nginx.conf
-
-user  nginx;
-worker_processes  auto;
-
-error_log  /var/log/nginx/error.log warn;
-pid        /var/run/nginx.pid;
+worker_processes 1;
 
 events {
     worker_connections 1024;
 }
 
 http {
-    include       mime.types;
-    default_type  application/octet-stream;
+    include mime.types;
+    default_type application/octet-stream;
+    sendfile on;
+    keepalive_timeout 65;
 
-    log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
-                      '$status $body_bytes_sent "$http_referer" '
-                      '"$http_user_agent" "$http_x_forwarded_for"';
-
-    access_log  /var/log/nginx/access.log  main;
-
-    sendfile        on;
-    keepalive_timeout  65;
-
-
-    # Node.js cluster load balancing
+    # Define the upstream Node.js cluster
     upstream nodejs_cluster {
-        least_conn;
+        least_conn;   # Load balancing method (least connections)
         server 127.0.0.1:3001;
         server 127.0.0.1:3002;
         server 127.0.0.1:3003;
     }
 
-    # Redir
+    # HTTPS server block
+    server {
+        listen 443 ssl;
+        server_name localhost;
+
+        # SSL certificate and key
+        ssl_certificate     /Users/nana/nginx-cert/nginx.crt;
+        ssl_certificate_key /Users/nana/nginx-cert/nginx.key;
+
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_ciphers HIGH:!aNULL:!MD5;
+
+        location / {
+            proxy_pass http://nodejs_cluster;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+    }
+
+    # HTTP server block (redirect all traffic to HTTPS)
+    server {
+        listen 80;
+        server_name localhost;
+
+        return 301 https://$host$request_uri;
+    }
+
+    # Optional: Local test server on 8080 (non-SSL)
+    server {
+        listen 8080;
+        server_name localhost;
+
+        location / {
+            proxy_pass http://nodejs_cluster;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+    }
+}
+
